@@ -944,6 +944,46 @@ async def get_file_stream(
             yield data
 
 
+def _get_part_from_position(
+    parts: list[MultiPartPath], seek_position: int
+) -> tuple[list[MultiPartPath] | None, int]:
+    """Get the remaining parts list from a timestamp.
+
+    Arguments:
+    parts: The list of  parts
+    seek_position: The seeking position in seconds of the tracklist
+
+    Returns:
+        In a tuple, A list of  parts, starting with the one at the requested
+        seek position and the position in seconds to seek to in the first
+        track.
+        A tuple of None and 0 if the track wasn't found
+    """
+    skipped_duration = 0.0
+    for i, part in enumerate(parts):
+        if not isinstance(part, MultiPartPath):
+            raise InvalidDataError("Multi-file streamdetails requires a list of MultiPartPath")
+        if part.duration is None:
+            raise InvalidDataError("Track has None duration, cannot find position")
+        if skipped_duration + part.duration < seek_position:
+            skipped_duration += part.duration
+            continue
+
+        position = seek_position - skipped_duration
+
+        # Seeking in some tracks is inaccurate, making the seek to a chapter land on the end of
+        # the previous track. If we're within 2 second of the end, skip the current track
+        if position + 2 >= part.duration:
+            LOGGER.debug(
+                f"Skipping to the next part due to seek position being at the end: {position}"
+            )
+            return parts[i + 1:], 0
+
+        return parts[i:], int(position)
+
+    return None, 0
+
+
 async def get_multi_file_stream(
     mass: MusicAssistant,  # noqa: ARG001
     streamdetails: StreamDetails,
@@ -955,19 +995,11 @@ async def get_multi_file_stream(
     Arguments:
     seek_position: The position to seek to in seconds
     """
-    files_list: list[str] = []
     if not isinstance(streamdetails.path, list):
         raise InvalidDataError("Multi-file streamdetails requires a list of MultiPartPath")
-    skipped_duration = 0.0
-    for part in streamdetails.path:
-        if not isinstance(part, MultiPartPath):
-            raise InvalidDataError("Multi-file streamdetails requires a list of MultiPartPath")
-        if seek_position and part.duration and (skipped_duration + part.duration) < seek_position:
-            skipped_duration += part.duration
-            continue
-        files_list.append(part.path)
-    if seek_position:
-        seek_position -= int(skipped_duration)
+    parts, seek_position = _get_part_from_position(streamdetails.path, seek_position)
+    assert parts is not None
+    files_list = [part.path for part in parts]
 
     # concat input files
     temp_file = f"/tmp/{shortuuid.random(20)}.txt"  # noqa: S108
