@@ -30,4 +30,7 @@ EXPOSE 8095
 RUN chmod 777 -R /app && \
     chmod 777 -R /tmp
 
-ENTRYPOINT ["mass", "--data-dir", "/data", "--cache-dir", "/data/.cache"]
+
+COPY entrypoint.sh /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

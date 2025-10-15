@@ -18,3 +18,5 @@ venv/
 .history
 .idea
 .coverage
+Dockerfile
+entrypoint.sh
